@@ -41,9 +41,10 @@ from sklearn.inspection import permutation_importance
 # ----------------------------
 # 0) Config
 # ----------------------------
-DATA_DIR = r"D:\lunwen\Retailrocket"   # 改成你的文件夹路径
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
-EVENTS_PATH = os.path.join(DATA_DIR, "events.csv")
+EVENTS_PATH = os.path.join(DATA_DIR, "new.xlsx")
 CATEGORY_TREE_PATH = os.path.join(DATA_DIR, "category_tree.csv")
 ITEM_PROPS_PATH = os.path.join(DATA_DIR, "item_properties_part1.csv")
 
@@ -562,8 +563,15 @@ def train_select_and_save_best(models: dict,
 # 数据加载
 # ----------------------------
 def load_data(file_obj=None):
+    """
+    优先读取上传文件；
+    如果没有上传文件，则读取仓库 data 目录中的默认文件。
+    """
+    source_name = None
+
     if file_obj is not None:
         file_name = file_obj.name.lower()
+        source_name = file_obj.name
 
         if file_name.endswith(".csv"):
             events = pd.read_csv(file_obj)
@@ -571,16 +579,28 @@ def load_data(file_obj=None):
             events = pd.read_excel(file_obj)
         else:
             raise ValueError("仅支持 csv 或 xlsx 文件")
+
     else:
+        if not os.path.exists(EVENTS_PATH):
+            raise FileNotFoundError(
+                f"未上传文件，且默认数据文件不存在：{EVENTS_PATH}"
+            )
+
+        source_name = EVENTS_PATH
+
         if EVENTS_PATH.lower().endswith(".csv"):
             events = pd.read_csv(EVENTS_PATH)
         elif EVENTS_PATH.lower().endswith(".xlsx"):
             events = pd.read_excel(EVENTS_PATH)
         else:
-            raise ValueError("EVENTS_PATH 仅支持 csv 或 xlsx 文件")
+            raise ValueError("默认数据文件仅支持 csv 或 xlsx 文件")
+
+    if "timestamp" not in events.columns:
+        raise ValueError("数据中缺少 timestamp 列")
 
     events["timestamp"] = pd.to_datetime(events["timestamp"], unit="ms")
 
+    print(f"[load_data] 当前读取数据源: {source_name}")
     return events
 
 
@@ -921,14 +941,16 @@ def rolling_time_cv(dataset, model, feature_cols, n_folds=3, min_train_anchors=3
 # 主流程
 # ----------------------------
 def main():
-
     if not (
-        os.path.exists(EVENTS_PATH) and
-        os.path.exists(CATEGORY_TREE_PATH) and
-        os.path.exists(ITEM_PROPS_PATH)
+            os.path.exists(EVENTS_PATH) and
+            os.path.exists(CATEGORY_TREE_PATH) and
+            os.path.exists(ITEM_PROPS_PATH)
     ):
         raise FileNotFoundError(
-            "数据文件路径不存在，请检查 DATA_DIR 与文件名：events.csv / category_tree.csv / item_properties_part1.csv"
+            f"数据文件路径不存在，请检查 data 目录下是否存在："
+            f"{os.path.basename(EVENTS_PATH)} / "
+            f"{os.path.basename(CATEGORY_TREE_PATH)} / "
+            f"{os.path.basename(ITEM_PROPS_PATH)}"
         )
 
     ensure_artifact_dirs()
