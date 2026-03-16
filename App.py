@@ -7,7 +7,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from Ana import run_pipeline
+import os
 
+DEFAULT_EVENTS_PATH = "data/new.xlsx"
 st.set_page_config(
     page_title="电商购买意向预测系统",
     page_icon="📈",
