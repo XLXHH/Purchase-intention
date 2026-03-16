@@ -9,7 +9,9 @@ import streamlit as st
 from Ana import run_pipeline
 import os
 
-DEFAULT_EVENTS_PATH = "data/new.xlsx"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_EVENTS_PATH = os.path.join(BASE_DIR, "data", "new.xlsx")
+
 st.set_page_config(
     page_title="电商购买意向预测系统",
     page_icon="📈",
@@ -350,39 +352,44 @@ with left_col:
         type=["csv", "xlsx"],
         help="支持 CSV / XLSX 文件，用于模型预测与分析"
     )
-    
+
     # ==========================
     # 优先使用上传文件
     # ==========================
-    
+
     if uploaded_events is not None:
-    
+
         st.session_state.uploaded_file_bytes = uploaded_events.getvalue()
         st.session_state.uploaded_file_name = uploaded_events.name
-    
+
         st.success(f"已加载文件：{uploaded_events.name}")
         data_source = "upload"
-    
+
     # ==========================
     # 否则使用默认数据
     # ==========================
 
-else:
-
-    if os.path.exists(DEFAULT_EVENTS_PATH):
-
-        st.info("未上传文件，使用默认数据集")
-        st.session_state.uploaded_file_bytes = None
-        st.session_state.uploaded_file_name = DEFAULT_EVENTS_PATH
-        data_source = "default"
-
     else:
 
-        st.markdown(
-            '<div class="upload-hint">支持 CSV / XLSX 格式。建议上传清洗后的事件数据，以获得更稳定的预测结果。</div>',
-            unsafe_allow_html=True
-        )
-        data_source = None
+        if os.path.exists(DEFAULT_EVENTS_PATH):
+
+            st.info("未上传文件，使用默认数据集")
+
+            with open(DEFAULT_EVENTS_PATH, "rb") as f:
+
+                st.session_state.uploaded_file_bytes = f.read()
+
+            st.session_state.uploaded_file_name = os.path.basename(DEFAULT_EVENTS_PATH)
+
+            data_source = "default"
+
+        else:
+
+            st.markdown(
+                '<div class="upload-hint">支持 CSV / XLSX 格式。建议上传清洗后的事件数据，以获得更稳定的预测结果。</div>',
+                unsafe_allow_html=True
+            )
+            data_source = None
 
 with right_col:
     st.markdown("#### 🎛️ 运行控制")
