@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from datetime import datetime
 import time
 import joblib
@@ -48,14 +49,41 @@ EVENTS_PATH = os.path.join(DATA_DIR, "new.xlsx")
 CATEGORY_TREE_PATH = os.path.join(DATA_DIR, "category_tree.csv")
 ITEM_PROPS_PATH = os.path.join(DATA_DIR, "item_properties_part1.csv")
 
-'''OBS_DAYS = 7
+OBS_DAYS = 7
 PRED_DAYS = 7
 ANCHOR_FREQ = "7D"
-MIN_EVENTS_IN_OBS = 3'''
-OBS_DAYS = 0.15
+MIN_EVENTS_IN_OBS = 3
+'''OBS_DAYS = 0.15
 PRED_DAYS = 0.15
-ANCHOR_FREQ = "2H"
-MIN_EVENTS_IN_OBS = 1
+ANCHOR_FREQ = "2h"
+MIN_EVENTS_IN_OBS = 1'''
+
+
+def _normalize_pandas_freq(freq):
+    """
+    Pandas 2.2+ 起弃用小时偏移大写别名 'H'，应使用 'h'（如 2H -> 2h）。
+    不改动 BH/CBH 等复合别名中的 H（其前为字母）。
+    """
+    if freq is None or not isinstance(freq, str):
+        return freq
+    try:
+        from pandas.tseries.frequencies import to_offset
+        to_offset(freq)
+        return freq
+    except (ValueError, TypeError):
+        pass
+    fixed = re.sub(r"(?<![A-Za-z])H(?![A-Za-z])", "h", freq)
+    if fixed == freq:
+        return freq
+    try:
+        from pandas.tseries.frequencies import to_offset
+        to_offset(fixed)
+        return fixed
+    except Exception:
+        return fixed
+
+
+ANCHOR_FREQ = _normalize_pandas_freq(ANCHOR_FREQ)
 
 
 # 多尺度窗口（必须 <= OBS_DAYS）
@@ -644,10 +672,11 @@ def build_dataset(events, progress_callback=None, control_state=None):
     min_time = events["timestamp"].min()
     max_time = events["timestamp"].max()
 
+    anchor_freq = _normalize_pandas_freq(ANCHOR_FREQ)
     anchors = pd.date_range(
         min_time + pd.Timedelta(days=OBS_DAYS),
         max_time - pd.Timedelta(days=PRED_DAYS),
-        freq=ANCHOR_FREQ
+        freq=anchor_freq
     )
 
     rows = []
