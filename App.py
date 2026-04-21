@@ -1,7 +1,10 @@
+#https://purchase-intention-pnyjc2gkm88jzyvdropdmd.streamlit.app/
+
 import time
 import threading
 import io
 import queue
+import traceback
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -10,7 +13,17 @@ from Ana import run_pipeline
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_EVENTS_PATH = os.path.join(BASE_DIR, "data", "new.xlsx")
+DEFAULT_EVENTS_CANDIDATES = [
+    os.path.join(BASE_DIR, "new.xlsx"),
+    os.path.join(BASE_DIR, "data", "new.xlsx")
+]
+
+
+def resolve_default_events_path():
+    for path in DEFAULT_EVENTS_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    return None
 
 st.set_page_config(
     page_title="电商购买意向预测系统",
@@ -257,7 +270,8 @@ def background_run_pipeline(file_bytes, file_name, result_queue):
         result_queue.put({
             "status": "error",
             "result": None,
-            "error": str(e)
+            "error": str(e),
+            "traceback": traceback.format_exc()
         })
 
 def render_header():
@@ -332,6 +346,8 @@ if "worker_thread" not in st.session_state:
     st.session_state.worker_thread = None
 if "run_error" not in st.session_state:
     st.session_state.run_error = None
+if "run_traceback" not in st.session_state:
+    st.session_state.run_traceback = None
 if "uploaded_file_bytes" not in st.session_state:
     st.session_state.uploaded_file_bytes = None
 if "uploaded_file_name" not in st.session_state:
@@ -370,16 +386,17 @@ with left_col:
     # ==========================
 
     else:
-
-        if os.path.exists(DEFAULT_EVENTS_PATH):
+        default_events_path = resolve_default_events_path()
+        if default_events_path:
 
             st.info("未上传文件，使用默认数据集")
 
-            with open(DEFAULT_EVENTS_PATH, "rb") as f:
+            with open(default_events_path, "rb") as f:
 
                 st.session_state.uploaded_file_bytes = f.read()
 
-            st.session_state.uploaded_file_name = os.path.basename(DEFAULT_EVENTS_PATH)
+            st.session_state.uploaded_file_name = os.path.basename(default_events_path)
+            st.caption(f"默认数据路径：{default_events_path}")
 
             data_source = "default"
 
@@ -416,6 +433,7 @@ if start_clicked:
         st.session_state.start_time = time.time()
         st.session_state.result = None
         st.session_state.run_error = None
+        st.session_state.run_traceback = None
         st.session_state.worker_running = True
         while not st.session_state.result_queue.empty():
             try:
@@ -492,6 +510,7 @@ with s2:
 
             if worker_msg["status"] == "error":
                 st.session_state.run_error = worker_msg["error"]
+                st.session_state.run_traceback = worker_msg.get("traceback")
                 st.session_state.task_status = "stopped"
             else:
                 st.session_state.result = worker_msg["result"]
@@ -502,6 +521,12 @@ with s2:
         except queue.Empty:
             time.sleep(1)
             st.rerun()
+
+if st.session_state.run_error:
+    st.error(f"任务运行失败：{st.session_state.run_error}")
+    if st.session_state.get("run_traceback"):
+        with st.expander("查看详细报错（Traceback）"):
+            st.code(st.session_state.run_traceback, language="text")
 
 if st.session_state.result is not None:
     st.success("运行完成")
