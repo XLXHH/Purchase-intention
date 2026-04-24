@@ -1,6 +1,5 @@
 import os
 import json
-import re
 from datetime import datetime
 import time
 import joblib
@@ -55,35 +54,8 @@ ANCHOR_FREQ = "7D"
 MIN_EVENTS_IN_OBS = 3
 '''OBS_DAYS = 0.15
 PRED_DAYS = 0.15
-ANCHOR_FREQ = "2h"
+ANCHOR_FREQ = "2H"
 MIN_EVENTS_IN_OBS = 1'''
-
-
-def _normalize_pandas_freq(freq):
-    """
-    Pandas 2.2+ 起弃用小时偏移大写别名 'H'，应使用 'h'（如 2H -> 2h）。
-    不改动 BH/CBH 等复合别名中的 H（其前为字母）。
-    """
-    if freq is None or not isinstance(freq, str):
-        return freq
-    try:
-        from pandas.tseries.frequencies import to_offset
-        to_offset(freq)
-        return freq
-    except (ValueError, TypeError):
-        pass
-    fixed = re.sub(r"(?<![A-Za-z])H(?![A-Za-z])", "h", freq)
-    if fixed == freq:
-        return freq
-    try:
-        from pandas.tseries.frequencies import to_offset
-        to_offset(fixed)
-        return fixed
-    except Exception:
-        return fixed
-
-
-ANCHOR_FREQ = _normalize_pandas_freq(ANCHOR_FREQ)
 
 
 # 多尺度窗口（必须 <= OBS_DAYS）
@@ -497,18 +469,24 @@ def train_select_and_save_best(models: dict,
                                val_df,
                                test_df, progress_callback=None, control_state=None):
 
+    def _is_stopped(state):
+        return state.get("stop_flag", False) or state.get("stop", False)
+
+    def _is_paused(state):
+        return state.get("pause_flag", False) or state.get("pause", False)
+
     all_runs = []
 
     total_models = len(models)
 
     for idx, (name, model) in enumerate(models.items(), start=1):
         if control_state is not None:
-            if control_state.get("stop", False):
+            if _is_stopped(control_state):
                 raise RuntimeError("任务已停止")
 
-            while control_state.get("pause", False):
+            while _is_paused(control_state):
                 time.sleep(0.2)
-                if control_state.get("stop", False):
+                if _is_stopped(control_state):
                     raise RuntimeError("任务已停止")
 
         if progress_callback is not None:
@@ -669,14 +647,19 @@ def featurize_user_obs(df):
 # ----------------------------
 def build_dataset(events, progress_callback=None, control_state=None):
 
+    def _is_stopped(state):
+        return state.get("stop_flag", False) or state.get("stop", False)
+
+    def _is_paused(state):
+        return state.get("pause_flag", False) or state.get("pause", False)
+
     min_time = events["timestamp"].min()
     max_time = events["timestamp"].max()
 
-    anchor_freq = _normalize_pandas_freq(ANCHOR_FREQ)
     anchors = pd.date_range(
         min_time + pd.Timedelta(days=OBS_DAYS),
         max_time - pd.Timedelta(days=PRED_DAYS),
-        freq=anchor_freq
+        freq=ANCHOR_FREQ
     )
 
     rows = []
@@ -685,12 +668,12 @@ def build_dataset(events, progress_callback=None, control_state=None):
     for i, anchor in enumerate(anchors, start=1):
 
         if control_state is not None:
-            if control_state.get("stop", False):
+            if _is_stopped(control_state):
                 raise RuntimeError("任务已停止")
 
-            while control_state.get("pause", False):
+            while _is_paused(control_state):
                 time.sleep(0.2)
-                if control_state.get("stop", False):
+                if _is_stopped(control_state):
                     raise RuntimeError("任务已停止")
 
         obs_start = anchor - pd.Timedelta(days=OBS_DAYS)
@@ -892,6 +875,11 @@ def run_pipeline(file_obj=None, progress_callback=None, control_state=None):
 # Rolling Time CV
 # ----------------------------
 def rolling_time_cv(dataset, model, feature_cols, n_folds=3, min_train_anchors=3, progress_callback=None, control_state=None):
+    def _is_stopped(state):
+        return state.get("stop_flag", False) or state.get("stop", False)
+
+    def _is_paused(state):
+        return state.get("pause_flag", False) or state.get("pause", False)
 
     anchor_times = sorted(dataset["anchor_time"].drop_duplicates())
     total_anchors = len(anchor_times)
@@ -905,12 +893,12 @@ def rolling_time_cv(dataset, model, feature_cols, n_folds=3, min_train_anchors=3
     for i in range(n_folds):
 
         if control_state is not None:
-            if control_state.get("stop_flag", False):
+            if _is_stopped(control_state):
                 raise RuntimeError("任务已停止")
 
-            while control_state.get("pause_flag", False):
+            while _is_paused(control_state):
                 time.sleep(0.2)
-                if control_state.get("stop_flag", False):
+                if _is_stopped(control_state):
                     raise RuntimeError("任务已停止")
 
         train_end_idx = min_train_anchors + i
