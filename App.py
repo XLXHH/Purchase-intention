@@ -1,10 +1,7 @@
-#https://purchase-intention-pnyjc2gkm88jzyvdropdmd.streamlit.app/
-
 import time
 import threading
 import io
 import queue
-import traceback
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -13,17 +10,7 @@ from Ana import run_pipeline
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_EVENTS_CANDIDATES = [
-    os.path.join(BASE_DIR, "new.xlsx"),
-    os.path.join(BASE_DIR, "data", "new.xlsx")
-]
-
-
-def resolve_default_events_path():
-    for path in DEFAULT_EVENTS_CANDIDATES:
-        if os.path.exists(path):
-            return path
-    return None
+DEFAULT_EVENTS_PATH = os.path.join(BASE_DIR, "data", "events.csv")
 
 st.set_page_config(
     page_title="电商购买意向预测系统",
@@ -250,14 +237,14 @@ def inject_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
-def background_run_pipeline(file_bytes, file_name, result_queue):
+def background_run_pipeline(file_bytes, file_name, result_queue, control_state):
     try:
         file_obj = io.BytesIO(file_bytes)
         file_obj.name = file_name
 
         result = run_pipeline(
             file_obj=file_obj,
-            control_state=None
+            control_state=control_state
         )
 
         result_queue.put({
@@ -270,8 +257,7 @@ def background_run_pipeline(file_bytes, file_name, result_queue):
         result_queue.put({
             "status": "error",
             "result": None,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         })
 
 def render_header():
@@ -346,8 +332,6 @@ if "worker_thread" not in st.session_state:
     st.session_state.worker_thread = None
 if "run_error" not in st.session_state:
     st.session_state.run_error = None
-if "run_traceback" not in st.session_state:
-    st.session_state.run_traceback = None
 if "uploaded_file_bytes" not in st.session_state:
     st.session_state.uploaded_file_bytes = None
 if "uploaded_file_name" not in st.session_state:
@@ -386,17 +370,16 @@ with left_col:
     # ==========================
 
     else:
-        default_events_path = resolve_default_events_path()
-        if default_events_path:
+
+        if os.path.exists(DEFAULT_EVENTS_PATH):
 
             st.info("未上传文件，使用默认数据集")
 
-            with open(default_events_path, "rb") as f:
+            with open(DEFAULT_EVENTS_PATH, "rb") as f:
 
                 st.session_state.uploaded_file_bytes = f.read()
 
-            st.session_state.uploaded_file_name = os.path.basename(default_events_path)
-            st.caption(f"默认数据路径：{default_events_path}")
+            st.session_state.uploaded_file_name = os.path.basename(DEFAULT_EVENTS_PATH)
 
             data_source = "default"
 
@@ -430,10 +413,11 @@ if start_clicked:
         st.session_state.task_status = "running"
         st.session_state.pause_flag = False
         st.session_state.stop_flag = False
+        st.session_state.pause = False
+        st.session_state.stop = False
         st.session_state.start_time = time.time()
         st.session_state.result = None
         st.session_state.run_error = None
-        st.session_state.run_traceback = None
         st.session_state.worker_running = True
         while not st.session_state.result_queue.empty():
             try:
@@ -446,7 +430,8 @@ if start_clicked:
             args=(
                 st.session_state.uploaded_file_bytes,
                 st.session_state.uploaded_file_name,
-                st.session_state.result_queue
+                st.session_state.result_queue,
+                st.session_state
             ),
             daemon=True
         )
@@ -456,14 +441,17 @@ if start_clicked:
 
 if pause_clicked:
     st.session_state.pause_flag = True
+    st.session_state.pause = True
     st.session_state.task_status = "paused"
 
 if resume_clicked:
     st.session_state.pause_flag = False
+    st.session_state.pause = False
     st.session_state.task_status = "running"
 
 if stop_clicked:
     st.session_state.stop_flag = True
+    st.session_state.stop = True
     st.session_state.task_status = "stopped"
 
 
@@ -510,7 +498,6 @@ with s2:
 
             if worker_msg["status"] == "error":
                 st.session_state.run_error = worker_msg["error"]
-                st.session_state.run_traceback = worker_msg.get("traceback")
                 st.session_state.task_status = "stopped"
             else:
                 st.session_state.result = worker_msg["result"]
@@ -519,14 +506,8 @@ with s2:
             st.rerun()
 
         except queue.Empty:
-            time.sleep(1)
+            time.sleep(0.2)
             st.rerun()
-
-if st.session_state.run_error:
-    st.error(f"任务运行失败：{st.session_state.run_error}")
-    if st.session_state.get("run_traceback"):
-        with st.expander("查看详细报错（Traceback）"):
-            st.code(st.session_state.run_traceback, language="text")
 
 if st.session_state.result is not None:
     st.success("运行完成")
@@ -538,19 +519,19 @@ if st.session_state.result is not None:
         metrics = st.session_state.result.get("visual_metrics", {})
 
         card1, card2, card3, card4 = st.columns(4)
-        card1.metric("准确率 Accuracy",
+        card1.metric("测试集准确率 Accuracy",
                      f"{metrics.get('accuracy', 0):.4f}" if metrics.get("accuracy") is not None else "N/A")
-        card2.metric("精准率 Precision",
+        card2.metric("测试集精准率 Precision",
                      f"{metrics.get('precision', 0):.4f}" if metrics.get("precision") is not None else "N/A")
-        card3.metric("召回率 Recall", f"{metrics.get('recall', 0):.4f}" if metrics.get("recall") is not None else "N/A")
-        card4.metric("F1", f"{metrics.get('f1', 0):.4f}" if metrics.get("f1") is not None else "N/A")
+        card3.metric("测试集召回率 Recall", f"{metrics.get('recall', 0):.4f}" if metrics.get("recall") is not None else "N/A")
+        card4.metric("测试集F1", f"{metrics.get('f1', 0):.4f}" if metrics.get("f1") is not None else "N/A")
 
         card5, card6, card7, card8 = st.columns(4)
-        card5.metric("ROC-AUC", f"{metrics.get('roc_auc', 0):.4f}" if metrics.get("roc_auc") is not None else "N/A")
-        card6.metric("PR-AUC", f"{metrics.get('pr_auc', 0):.4f}" if metrics.get("pr_auc") is not None else "N/A")
-        card7.metric("正确率",
+        card5.metric("测试集ROC-AUC", f"{metrics.get('roc_auc', 0):.4f}" if metrics.get("roc_auc") is not None else "N/A")
+        card6.metric("测试集PR-AUC", f"{metrics.get('pr_auc', 0):.4f}" if metrics.get("pr_auc") is not None else "N/A")
+        card7.metric("测试集正确率",
                      f"{metrics.get('correct_rate', 0):.4f}" if metrics.get("correct_rate") is not None else "N/A")
-        card8.metric("错误率",
+        card8.metric("测试集错误率",
                      f"{metrics.get('error_rate', 0):.4f}" if metrics.get("error_rate") is not None else "N/A")
 
         left_chart, right_chart = st.columns(2)
@@ -573,7 +554,7 @@ if st.session_state.result is not None:
             y="数值",
             color="指标",
             color_discrete_sequence=CHART_COLORS,
-            title="模型核心评估指标"
+            title="测试集核心评估指标"
         )
         fig_bar.update_traces(
             texttemplate="%{y:.3f}",
@@ -596,7 +577,7 @@ if st.session_state.result is not None:
             pie_df,
             names="类别",
             values="数值",
-            title="正确率 / 错误率分布",
+            title="测试集正确率 / 错误率分布",
             hole=0.5,
             color="类别",
             color_discrete_map={
@@ -639,7 +620,7 @@ if st.session_state.result is not None:
                 "FP": "#f59e0b",
                 "FN": "#ef4444"
             },
-            title="混淆矩阵构成"
+            title="测试集混淆矩阵构成"
         )
         fig_conf.update_traces(
             texttemplate="%{y}",
@@ -654,7 +635,7 @@ if st.session_state.result is not None:
 
         with right_chart2:
             if "importance" in st.session_state.result:
-                imp_df = st.session_state.result["importance"].head(15).copy()
+                imp_df = st.session_state.result["importance"].head(5).copy()
                 fig_imp = px.bar(
                     imp_df,
                     x="importance_mean",
@@ -668,7 +649,7 @@ if st.session_state.result is not None:
                         [0.75, "#3b82f6"],
                         [1.0, "#1d4ed8"]
                     ],
-                    title="Top 15 特征重要性"
+                    title="Top 5 特征重要性"
                 )
                 fig_imp.update_layout(
                     yaxis={"categoryorder": "total ascending"},
@@ -704,7 +685,7 @@ if st.session_state.result is not None:
 
     with tab2:
         if "cv_metrics" in st.session_state.result and st.session_state.result["cv_metrics"]:
-            st.markdown("#### 📈 Rolling CV 结果")
+            st.markdown("#### 📈 Rolling CV 结果（HistGB）")
             cv_df = pd.DataFrame(st.session_state.result["cv_metrics"])
             st.dataframe(cv_df, use_container_width=True)
 
@@ -714,7 +695,7 @@ if st.session_state.result is not None:
                     x="fold",
                     y="pr_auc",
                     markers=True,
-                    title="Rolling CV - PR-AUC 变化趋势"
+                    title="HistGB Rolling CV - PR-AUC 变化趋势"
                 )
                 fig_cv.update_traces(
                     line=dict(color="#2563eb", width=3),
@@ -732,9 +713,9 @@ if st.session_state.result is not None:
         )
 
         if "importance" in st.session_state.result:
-            st.markdown("#### 🔍 特征重要性 Top 30")
+            st.markdown("#### 🔍 特征重要性 Top 5")
             st.dataframe(
-                st.session_state.result["importance"].head(30),
+                st.session_state.result["importance"].head(5),
                 use_container_width=True
             )
 
